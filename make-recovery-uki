@@ -1,0 +1,635 @@
+#!/usr/bin/env bash
+
+set -o nounset
+set -o errexit
+
+# make-recovery-uki: assemble a recovery system out of Alpine Linux parts,
+#                    and cram it into a kernel/initramfs pair and a UKI
+
+# SPDX-License-Identifier: MIT
+
+# Copyright (c) 2024 multiplealiases
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# “Software”), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+# NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+# THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+die() {
+	# shellcheck disable=SC2059
+	printf "$@"
+	exit 1
+}
+
+cleanup_array="$(mktemp)"
+cleanup() {
+    < "$cleanup_array" xargs -0 -I{} rm -rf --one-file-system {}
+    rm -f "$cleanup_array"
+}
+# shellcheck disable=SC2120
+append_mktemp() {
+    tmp="$(mktemp "$@")"
+    printf "%s\0" "$tmp" >> "$cleanup_array"
+    printf "%s\n" "$tmp"
+}
+trap 'cleanup' INT HUP TERM EXIT
+
+function resolve_kmods_iteration() {
+    modulesdep="$1"
+    modlist="$2"
+    scratch="$3"
+    < "$modlist" xargs printf '/%s\.ko.*:\n' > "$scratch"
+    grep -f "$scratch" "$modulesdep" | sed 's/ /\n/g; s/.*:\n//' | sed 's/^.\+\///g; s/\..\+$//g'
+}
+
+function guess_efistub() {
+    if [[ -f /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]]
+    then
+        echo /usr/lib/systemd/boot/efi/linuxx64.efi.stub
+    elif [[ -f /usr/lib/gummiboot/linuxx64.efi.stub ]]
+    then
+        echo /usr/lib/gummiboot/linuxx64.efi.stub
+    else
+        echo
+    fi
+}
+
+efistub_candidate="$(guess_efistub)"
+efistub="${efistub-$efistub_candidate}"
+
+if [[ $efistub == "" ]]
+then
+    1>&2 cat << MSG
+The EFI stub linuxx64.efi.stub (required to produce a UKI)
+is absent, and no candidate exists in the filesystem.
+
+The following distributions are known to package
+a suitable stub under the following package names.
+
+Alpine: gummiboot-efistub
+Arch: systemd
+Chimera: systemd-boot-efi
+Debian Sid, Ubuntu latest: systemd-boot-efi
+Fedora: systemd-boot-unsigned
+Gentoo: sys-apps/systemd[boot] or sys-apps/systemd-utils[boot]
+Void: systemd-boot-efistub
+MSG
+    exit 1
+fi
+
+help(){
+    cat << EOF
+make-recovery-uki: assemble a recovery system out of Alpine Linux parts,
+                   and cram it into a kernel/initramfs pair and a UKI
+Usage: make-recovery-uki --output [name]
+Options
+-m, --modules       space-separated list of additional kernel modules
+-p, --packages      space-separated list of additional packages
+-e, --efistub       path to the file linuxx64.efi.stub
+-o, --output        output file prefix (required)
+-h, --help          this help
+EOF
+}
+
+while [ "$#" -gt 0 ]
+do
+    case "$1" in
+    --help)
+        help
+        exit 1
+        ;;
+    -o | --output)
+        output="$2"
+        shift 2
+        ;;
+    -m | --modules)
+        modules="$2"
+        shift 2
+        ;;
+    -p | --packages)
+        packages="$2"
+        shift 2
+        ;;
+    -e | --efistub)
+        efistub="$2"
+        shift 2
+        ;;
+    -s | --extra-script)
+        extrascript="$2"
+        shift 2
+        ;;
+    *)
+        die "argument(s) not recognized: %s\nUse --help for help\n" "$*"
+        ;;
+    esac
+done
+
+if [ "$(id -u)" -ne 0 ]
+then
+    die 'This script must be run as root!\n'
+fi
+
+# Cheap hack in combination with set -o nounset: disallows the
+# user from going any further with an unset --output
+1>/dev/null echo "$output"
+empty=''
+modules="${modules:-$empty}"
+packages="${packages:-$empty}"
+
+blank_tmpfile="$(append_mktemp)"
+extrascript="${extrascript:-$blank_tmpfile}"
+
+rootdir="$(append_mktemp -d)"
+initfs="$(append_mktemp)"
+modlist="$(append_mktemp)"
+moddir="$(append_mktemp -d)"
+modlayout="$(append_mktemp)"
+osrel="$(append_mktemp)"
+
+vmlinuz="$(append_mktemp)"
+curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/netboot/vmlinuz-lts > "$vmlinuz"
+modloop="$(append_mktemp)"
+curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/netboot/modloop-lts > "$modloop"
+modloop_extracted="$(append_mktemp -d)"
+amr="$(append_mktemp)"
+chmod +x "$amr"
+
+unsquashfs -dest "$modloop_extracted" "$modloop"
+
+# every kmod currently loaded is probably fine
+cut -f 1 -d ' ' /proc/modules > "$modlist"
+# This is a *huge* list, and I'm sorry.
+# loop, ext4, btrfs, xfs, vfat, fuse, *fs: filesystems
+# usbhid: USB input
+# usb_storage, usbhid, ata_piix, nvme: storage
+# simpledrm: ?
+# nls*: mount FAT filesystems
+# af_packet: no networking otherwise
+# everything in crypto/: WiFi
+# dm*: anything relying on device-mapper, e.g. LUKS and LVM
+# hid*: maybe this'll be useful??
+# tun tap veth veth bonding: funsies
+cat << INCLUDE >> "$modlist"
+ext4
+xfs
+btrfs
+fat
+vfat
+isofs
+overlayfs
+squashfs
+efivarfs
+loop
+fuse
+ntfs3
+
+usbhid
+usb_storage
+ata_piix
+nvme
+
+simpledrm
+
+af_packet
+
+nls
+nls_ascii
+nls_cp1250
+nls_cp1251
+nls_cp1255
+nls_cp437
+nls_cp737
+nls_cp775
+nls_cp850
+nls_cp852
+nls_cp855
+nls_cp857
+nls_cp860
+nls_cp861
+nls_cp862
+nls_cp863
+nls_cp864
+nls_cp865
+nls_cp866
+nls_cp869
+nls_cp874
+nls_cp932
+nls_cp936
+nls_cp949
+nls_cp950
+nls_euc-jp
+nls_iso8859-1
+nls_iso8859-13
+nls_iso8859-14
+nls_iso8859-15
+nls_iso8859-2
+nls_iso8859-3
+nls_iso8859-4
+nls_iso8859-5
+nls_iso8859-6
+nls_iso8859-7
+nls_iso8859-9
+nls_koi8-r
+nls_koi8-ru
+nls_koi8-u
+nls_ucs2_utils
+nls_utf8
+
+aegis128-aesni
+aesni-intel
+blowfish-x86_64
+camellia-aesni-avx2
+camellia-aesni-avx-x86_64
+camellia-x86_64
+cast5-avx-x86_64
+cast6-avx-x86_64
+chacha-x86_64
+crc32c-intel
+crc32-pclmul
+crct10dif-pclmul
+curve25519-x86_64
+ghash-clmulni-intel
+nhpoly1305-avx2
+nhpoly1305-sse2
+poly1305-x86_64
+serpent-avx2
+serpent-avx-x86_64
+serpent-sse2-x86_64
+sha1-ssse3
+sha256-ssse3
+sha512-ssse3
+sm4-aesni-avx2-x86_64
+sm4-aesni-avx-x86_64
+twofish-avx-x86_64
+twofish-x86_64-3way
+twofish-x86_64
+
+adiantum
+aegis128
+af_alg
+algif_aead
+algif_hash
+algif_rng
+algif_skcipher
+ansi_cprng
+pkcs8_key_parser
+authenc
+authencesn
+blake2b_generic
+blowfish_common
+blowfish_generic
+camellia_generic
+cast5_generic
+cast6_generic
+cast_common
+ccm
+chacha20poly1305
+chacha_generic
+cmac
+crc32_generic
+crc32c_generic
+cryptd
+crypto_engine
+crypto_null
+crypto_simd
+crypto_user
+ctr
+curve25519-generic
+des_generic
+ecc
+ecdh_generic
+ecdsa_generic
+echainiv
+essiv
+fcrypt
+gcm
+geniv
+ghash-generic
+hctr2
+keywrap
+lrw
+lz4
+lz4hc
+md4
+michael_mic
+nhpoly1305
+pcbc
+pcrypt
+poly1305_generic
+polyval-generic
+rmd160
+seqiv
+serpent_generic
+sm4
+tcrypt
+twofish_common
+twofish_generic
+vmac
+wp512
+xcbc
+xctr
+xor
+xxhash_generic
+zstd
+
+gf128mul
+libaescfb
+libarc4
+libchacha20poly1305
+libchacha
+libcurve25519-generic
+libcurve25519
+libdes
+libpoly1305
+
+bcache
+dm-bio-prison
+dm-bufio
+dm-cache-smq
+dm-cache
+dm-crypt
+dm-delay
+dm-flakey
+dm-integrity
+dm-io-affinity
+dm-log-userspace
+dm-log-writes
+dm-log
+dm-mirror
+dm-mod
+dm-multipath
+dm-queue-length
+dm-raid
+dm-region-hash
+dm-round-robin
+dm-service-time
+dm-snapshot
+dm-switch
+dm-thin-pool
+dm-unstripe
+dm-verity
+dm-writecache
+dm-zero
+dm-persistent-data
+raid0
+raid1
+raid10
+raid456
+
+usbip-host
+usbip-hcd
+usbnet
+
+axp288_charger
+axp288_fuel_gauge
+cros_charge-control
+cros_peripheral_charger
+cros_usbpd-charger
+generic-adc-battery
+ug3105_battery
+wilco-charger
+
+speakup_acntsa
+speakup_apollo
+speakup_audptr
+speakup_bns
+speakup_decext
+speakup_dectlk
+speakup
+speakup_ltlk
+speakup_soft
+speakup_spkout
+speakup_txprt
+
+amd_sfh
+hid-alps
+hid-apple
+hid-asus
+hid-betopff
+hid-cherry
+hid-cmedia
+hid-cougar
+hid-elan
+hid-generic
+hid-gt683r
+hid-hyperv
+hid-icade
+hid-jabra
+hid-kensington
+hid-keytouch
+hid-lcpower
+hid-led
+hid-lenovo
+hid-letsketch
+hid-lg-g15
+hid-logitech-dj
+hid-logitech-hidpp
+hid-logitech
+hid-magicmouse
+hid-megaworld
+hid-mf
+hid-microsoft
+hid-multitouch
+hid-nintendo
+hid-ortek
+hid-penmount
+hid-picolcd
+hid-plantronics
+hid-playstation
+hid-primax
+hid-prodikeys
+hid-pxrc
+hid-razer
+hid-rmi
+hid-roccat-arvo
+hid-roccat-common
+hid-roccat-isku
+hid-roccat-kone
+hid-roccat-koneplus
+hid-roccat-konepure
+hid-roccat-kovaplus
+hid-roccat-lua
+hid-roccat-pyra
+hid-roccat-ryos
+hid-roccat-savu
+hid-roccat
+hid-semitek
+hid-sensor-hub
+hid-sigmamicro
+hid-sony
+hid-speedlink
+hid-steam
+hid-topre
+hid-uclogic
+hid-wiimote
+hid-xiaomi
+hid-zydacron
+hid
+i2c-hid-acpi
+i2c-hid
+intel-ish-ipc
+intel-ishtp-hid
+intel-ishtp
+uhid
+usbhid
+wacom
+
+tun
+tap
+veth
+bonding
+INCLUDE
+echo "$modules" | tr ' ' '\n' >> "$modlist"
+
+kernel_ver="$(file "$vmlinuz" | tr , '\n' | grep version | cut -f 3 -d ' ')"
+
+modulesdep="$modloop_extracted"/modules/"$kernel_ver"/modules.dep
+patterns_scratch="$(append_mktemp)"
+tmp="$(append_mktemp)"
+
+for _ in $(seq 1 10)
+do
+    resolve_kmods_iteration "$modulesdep" "$modlist" "$patterns_scratch" | tee /dev/stderr >> "$tmp"
+    cat "$tmp" >> "$modlist"
+    < "$modlist" sort | uniq > "$tmp"
+    cat "$tmp" > "$modlist"
+done
+
+< "$modlist" xargs printf '/%s\.ko.*\n' > "$tmp"
+cat "$tmp" > "$modlist"
+
+pushd "$modloop_extracted"/modules/"$kernel_ver"/
+find ./kernel -type d -print0 > "$modlayout"
+find . -maxdepth 1 -name 'modules*' | xargs -I{} cp {} "$moddir"/{}
+popd
+
+pushd "$moddir"
+xargs -0 mkdir -p < "$modlayout"
+popd
+
+pushd "$modloop_extracted"/modules/"$kernel_ver"/
+find . -type f -name '*.ko' | grep -f "$modlist" | xargs -I{} cp -v {} "$moddir"/{}
+popd
+
+mkdir -p "$rootdir"/lib/modules/"$kernel_ver"
+cp -r "$moddir"/* "$rootdir"/lib/modules/"$kernel_ver"
+
+curl https://raw.githubusercontent.com/alpinelinux/alpine-make-rootfs/v0.7.0/alpine-make-rootfs > "$amr"
+# This is not a small package set,
+# but I feel functionality is far more important than smallness.
+# alpine-conf: setup-interfaces
+# apk-tools: apk
+# acpid: ACPI, lets the computer shut down correctly
+# openrc-init: init system
+# kbd: setfont -d
+# busybox-mdev-openrc: mdev
+# agetty: no terminal otherwise
+# wpa_supplicant iwd iw: WiFi
+# wireless-regdb: regulatory.db for WiFi
+# e2fsprogs exfatprogs dosfstools cryptsetup lvm2: filesystems
+
+# The setup script is largely taken from the following sources:
+# * https://gist.github.com/lidgnulinux/4b40d72d358528e76c6f9be4ad6cbaa5
+# * https://words.filippo.io/dispatches/frood/
+"$amr" --packages "alpine-conf apk-tools acpid openrc-init busybox-extras kbd busybox-mdev-openrc agetty wpa_supplicant iw iwd wireless-regdb e2fsprogs btrfs-progs xfsprogs exfatprogs dosfstools cryptsetup lvm2 ntfs-3g ntfs-3g-progs $packages" "$rootdir" - --script-chroot << INNER
+ln -s /sbin/openrc-init /init
+
+rc-update add devfs sysinit
+rc-update add dmesg sysinit
+rc-update add hwdrivers sysinit
+
+rc-update add modules boot
+rc-update add hwclock boot
+rc-update add networking boot
+rc-update add swap boot
+rc-update add seedrng boot
+rc-update add hostname boot
+rc-update add bootmisc boot
+
+rc-update add acpid default
+rc-update add mdev sysinit
+
+rc-update add killprocs shutdown
+rc-update add mount-ro shutdown
+rc-update add savecache shutdown
+
+ln -s /etc/init.d/agetty /etc/init.d/agetty.ttyS0
+rc-update add agetty.ttyS0 default
+
+# 6 ttys, why not?
+ln -s /etc/init.d/agetty /etc/init.d/agetty.tty1
+ln -s /etc/init.d/agetty /etc/init.d/agetty.tty2
+ln -s /etc/init.d/agetty /etc/init.d/agetty.tty3
+ln -s /etc/init.d/agetty /etc/init.d/agetty.tty4
+ln -s /etc/init.d/agetty /etc/init.d/agetty.tty5
+ln -s /etc/init.d/agetty /etc/init.d/agetty.tty6
+rc-update add agetty.tty1 default
+rc-update add agetty.tty2 default
+rc-update add agetty.tty3 default
+rc-update add agetty.tty4 default
+rc-update add agetty.tty5 default
+rc-update add agetty.tty6 default
+
+echo 'rescue' > /etc/hostname
+
+# Blank out the password field for root so you can just log in.
+chpasswd -e << 'EOF'
+root:
+EOF
+# try and get eth0 set up automatically
+cat << EOF > /etc/network/interfaces
+auto lo
+iface lo inet loopback
+auto eth0
+iface eth0 inet dhcp
+EOF
+mkdir /sysroot
+
+$(cat "$extrascript")
+
+INNER
+
+pushd "$rootdir"
+find . -print0 | cpio --null -o --format=newc | zstd -T0 -19 -v > "$initfs"
+cat ./usr/lib/os-release > "$osrel"
+popd
+
+# Thank you, Arch Linux wiki.
+# https://wiki.archlinux.org/title/Unified_kernel_image#Manually
+align="$(objdump -p "$efistub" | awk '{ if ($1 == "SectionAlignment"){print $2} }')"
+align=$((16#$align))
+
+osrel_offs="$(objdump -h "$efistub" | awk 'NF==7 {size=strtonum("0x"$3); offset=strtonum("0x"$4)} END {print size + offset}')"
+osrel_offs=$((osrel_offs + "$align" - osrel_offs % "$align"))
+# move the .osrel offset by 100 $aligns to appease the PE gods
+osrel_offs=$((osrel_offs + 100 * align ))
+
+initrd_offs=$((osrel_offs + $(stat -Lc%s "$osrel")))
+initrd_offs=$((initrd_offs + "$align" - initrd_offs % "$align"))
+
+linux_offs=$((initrd_offs + $(stat -Lc%s "$initfs")))
+linux_offs=$((linux_offs + "$align" - linux_offs % "$align"))
+
+objcopy \
+	--add-section .osrel="$osrel" --change-section-vma .osrel="$(printf 0x%x $osrel_offs )" \
+	--add-section .initrd="$initfs" --change-section-vma .initrd="$(printf 0x%x $initrd_offs)"  \
+	--add-section .linux="$vmlinuz" --change-section-vma .linux="$(printf 0x%x $linux_offs)"   \
+	"$efistub" "$output".efi
+
+cp "$initfs" "$output".img
+cp "$vmlinuz" "$output"
+chmod 777 "$output".efi "$output".img "$output"
