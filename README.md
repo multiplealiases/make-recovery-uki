@@ -31,7 +31,9 @@ sudo ./make-recovery-uki -o worksforme \
 --packages 'linux-firmware-amdgpu linux-firmware-amdtee linux-firmware-other'
 ```
 
-For me, this produces a ~150 MB UKI.
+For me, this produces a ~150 MB UKI called `worksforme.efi`
+as well as a corresponding kernel/initramfs pair `worksforme`/`worksforme.img`
+
 File size may vary wildly depending on what firmware you include,
 up to ~600 MiB in the worst case.
 
@@ -47,7 +49,7 @@ If you use Nvidia, pass `-m 'nouveau'`.
 > Consider adding a timeout to your bootloader before testing,
 > as it might default to the new UKI.
 
-Boot this UKI using your bootloader of choice;
+Boot the recovery system using your bootloader of choice;
 systemd-boot and rEFInd will autodetect UKIs.
 
 Once you're booted (hopefully!), log in as root (no password).
@@ -84,6 +86,9 @@ Shut down using `openrc-shutdown -p`.
 * Hardcoded to use zstd for compression
 
 * Kinda a mess internally
+
+* Creates both a kernel/initramfs pair and a UKI,
+  regardless of what you need
 
 ## Dependencies
 
