@@ -100,6 +100,7 @@ Options
 -m, --modules       space-separated list of additional kernel modules
 -p, --packages      space-separated list of additional packages
 -e, --efistub       path to the file linuxx64.efi.stub
+-s, --extra-script  path to file with extra script for alpine-make-rootfs
 -o, --output        output file prefix (required)
 -h, --help          this help
 EOF
