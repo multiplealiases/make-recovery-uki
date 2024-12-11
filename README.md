@@ -59,7 +59,8 @@ to double the font size.
 If you have an Ethernet connection,
 no further network configuration should be required.
 
-If you have a WiFi connection, run `setup-interfaces` to get connected.
+If you have a WiFi card, run `setup-interfaces`, then
+run `rc-service networking restart`.
 Assuming you have the RAM to store it in,
 this now lets you install additional packages,
 in case the default package set isn't enough.
