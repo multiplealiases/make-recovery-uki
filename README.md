@@ -67,7 +67,7 @@ in case the default package set isn't enough.
 Now check if you can mount your filesystems.
 A directory called /sysroot has been provided for convenience.
 
-Shut down using `openrc-shutdown -p`.
+Shut down using `openrc-shutdown -p now`.
 
 ## Limitations
 
