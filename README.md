@@ -39,6 +39,23 @@ up to ~600 MiB in the worst case.
 
 If you use Nvidia, pass `-m 'nouveau'`.
 
+### Secure Boot
+
+You can use `sbsign` to sign the UKI
+using the same key and certificate you use to sign your kernel.
+
+```console
+$ sudo sbsign --key /etc/mok.key --cert /etc/mok.crt \
+  recovery.efi --output recovery.signed.efi
+```
+
+I have only tested this on a machine
+using the default Microsoft set of Secure Boot keys,
+but a careful reading of
+[Linux kernel documentation for module signing](https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html)
+suggests that this approach will work just fine even
+if you enrolled your own PK, KEK, and db keys.
+
 ## Testing
 
 > [!WARNING]
@@ -72,8 +89,7 @@ Shut down using `openrc-shutdown -p now`.
 
 ## Limitations
 
-* No Secure Boot support
-  (you can `sbsign` the UKI, but the modules aren't signed)
+* ~~No Secure Boot support~~
 
 * No GUI
 
