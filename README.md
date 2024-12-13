@@ -16,7 +16,9 @@ While the script tries to include every loaded module on your system
 and defaults to a reasonable package set for recovering a system,
 I haven't yet figured out how to include firmware automatically.
 
-Make a recovery system that works for this machine specifically.
+### Building a system
+
+Make a recovery system that works for the machine I'm typing this on.
 
 > [!TIP]
 > For your machine, examine
@@ -34,10 +36,20 @@ sudo ./make-recovery-uki -o worksforme \
 For me, this produces a ~150 MB UKI called `worksforme.efi`
 as well as a corresponding kernel/initramfs pair `worksforme`/`worksforme.img`
 
-File size may vary wildly depending on what firmware you include,
-up to ~600 MiB in the worst case.
-
 If you use Nvidia, pass `-m 'nouveau'`.
+
+### Alternative: building a universal system
+
+If your ESP is large enough (1 GB or larger), it may be more convenient to
+build a recovery system that contains all available firmware and modules.
+
+```
+sudo ./make-recovery-uki -o big \
+--packages 'linux-firmware' \
+--modules '.*'
+```
+
+This works out to a ~600 MiB UKI; large, but much more broadly compatible.
 
 ### Secure Boot
 
