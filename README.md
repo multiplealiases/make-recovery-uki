@@ -20,8 +20,8 @@ Make a recovery system that works for this machine specifically.
 
 > [!TIP]
 > For your machine, examine
-> [the Alpine Linux package index](https://pkgs.alpinelinux.org/packages?name=linux-firmware-*&branch=v3.21&repo=&arch=x86_64&origin=&flagged=&maintainer=).
-
+> [the Alpine Linux package index](https://pkgs.alpinelinux.org/packages?name=linux-firmware-*&branch=v3.21&repo=&arch=x86_64&origin=&flagged=&maintainer=)
+> and the output of `dmesg | grep -i firmware`.
 
 ```
 # amdgpu: AMD iGPU
