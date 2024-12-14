@@ -150,6 +150,10 @@ the last line of defense before you need to plug in a USB stick.
 [Arch Linux Wiki](https://wiki.archlinux.org/title/Unified_kernel_image#Manually)
 invocations for generating a UKI, taken almost verbatim.
 
+Android (and ChromeOS?) have recovery partitions,
+so it seemed strange to me that I'm unaware of any "desktop" Linuxes
+that implement a recovery of some kind.
+
 ## Licensing
 
 This script is licensed under MIT.
