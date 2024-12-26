@@ -137,6 +137,8 @@ Shut down using `openrc-shutdown -p now`.
 
 * `zstd`: compresses the initramfs
 
+* `file`: parsing kernel version out of vmlinuz
+
 ## Inspirations
 
 The concept is "heavily inspired" by the blog post
