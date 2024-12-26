@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 set -o nounset
 set -o errexit
@@ -37,7 +37,8 @@ die() {
 
 cleanup_array="$(mktemp)"
 cleanup() {
-    < "$cleanup_array" xargs -0 -I{} rm -rf --one-file-system {}
+    umount "$rootdir"/dev "$rootdir"/dev/shm "$rootdir"/dev/pts "$rootdir"/proc "$rootdir"/sys "$rootdir"/mnt || true
+    < "$cleanup_array" xargs -0 -I{} rm -rf {}
     rm -f "$cleanup_array"
 }
 # shellcheck disable=SC2120
@@ -47,8 +48,9 @@ append_mktemp() {
     printf "%s\n" "$tmp"
 }
 trap 'cleanup' INT HUP TERM EXIT
+rootdir="$(append_mktemp -d)"
 
-function resolve_kmods_iteration() {
+resolve_kmods_iteration() {
     modulesdep="$1"
     modlist="$2"
     scratch="$3"
@@ -56,11 +58,11 @@ function resolve_kmods_iteration() {
     grep -f "$scratch" "$modulesdep" | sed 's/ /\n/g; s/.*:\n//' | sed 's/^.\+\///g; s/\..\+$//g'
 }
 
-function guess_efistub() {
-    if [[ -f /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]]
+guess_efistub() {
+    if [ -f /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]
     then
         echo /usr/lib/systemd/boot/efi/linuxx64.efi.stub
-    elif [[ -f /usr/lib/gummiboot/linuxx64.efi.stub ]]
+    elif [ -f /usr/lib/gummiboot/linuxx64.efi.stub ]
     then
         echo /usr/lib/gummiboot/linuxx64.efi.stub
     else
@@ -71,7 +73,7 @@ function guess_efistub() {
 efistub_candidate="$(guess_efistub)"
 efistub="${efistub-$efistub_candidate}"
 
-if [[ $efistub == "" ]]
+if [ "$efistub" = "" ]
 then
     1>&2 cat << MSG
 The EFI stub linuxx64.efi.stub (required to produce a UKI)
@@ -154,7 +156,6 @@ packages="${packages:-$empty}"
 blank_tmpfile="$(append_mktemp)"
 extrascript="${extrascript:-$blank_tmpfile}"
 
-rootdir="$(append_mktemp -d)"
 initfs="$(append_mktemp)"
 modlist="$(append_mktemp)"
 moddir="$(append_mktemp -d)"
@@ -513,18 +514,19 @@ done
 < "$modlist" xargs printf '/%s\.ko.*\n' > "$tmp"
 cat "$tmp" > "$modlist"
 
-pushd "$modloop_extracted"/modules/"$kernel_ver"/
+here="$(pwd)"
+
+cd "$modloop_extracted"/modules/"$kernel_ver"/
 find ./kernel -type d -print0 > "$modlayout"
 find . -maxdepth 1 -name 'modules*' | xargs -I{} cp {} "$moddir"/{}
-popd
 
-pushd "$moddir"
+cd "$moddir"
 xargs -0 mkdir -p < "$modlayout"
-popd
 
-pushd "$modloop_extracted"/modules/"$kernel_ver"/
+cd "$modloop_extracted"/modules/"$kernel_ver"/
 find . -type f -name '*.ko' | grep -f "$modlist" | xargs -I{} cp -v {} "$moddir"/{}
-popd
+
+cd "$here"
 
 mkdir -p "$rootdir"/lib/modules/"$kernel_ver"
 cp -r "$moddir"/* "$rootdir"/lib/modules/"$kernel_ver"
@@ -604,26 +606,26 @@ $(cat "$extrascript")
 
 INNER
 
-pushd "$rootdir"
+cd "$rootdir"
 find . -print0 | cpio --null -o --format=newc | zstd -T0 -19 -v > "$initfs"
 cat ./usr/lib/os-release > "$osrel"
-popd
+cd "$here"
 
 # Thank you, Arch Linux wiki.
 # https://wiki.archlinux.org/title/Unified_kernel_image#Manually
 align="$(objdump -p "$efistub" | awk '{ if ($1 == "SectionAlignment"){print $2} }')"
-align=$((16#$align))
+align=$(printf '%d\n' "$align")
 
-osrel_offs="$(objdump -h "$efistub" | awk 'NF==7 {size=strtonum("0x"$3); offset=strtonum("0x"$4)} END {print size + offset}')"
-osrel_offs=$((osrel_offs + "$align" - osrel_offs % "$align"))
+osrel_offs="$(objdump -h "$efistub" | tail -n2 | head -n1 | tr -s ' ' | cut -f 4,5 -d ' ' | xargs printf '0x%s ' | xargs -n1 printf '%d ' | awk '{print $1 + $2}')"
+osrel_offs=$((osrel_offs + align - osrel_offs % align))
 # move the .osrel offset by 100 $aligns to appease the PE gods
 osrel_offs=$((osrel_offs + 100 * align ))
 
 initrd_offs=$((osrel_offs + $(stat -Lc%s "$osrel")))
-initrd_offs=$((initrd_offs + "$align" - initrd_offs % "$align"))
+initrd_offs=$((initrd_offs + align - initrd_offs % align))
 
 linux_offs=$((initrd_offs + $(stat -Lc%s "$initfs")))
-linux_offs=$((linux_offs + "$align" - linux_offs % "$align"))
+linux_offs=$((linux_offs + align - linux_offs % align))
 
 objcopy \
 	--add-section .osrel="$osrel" --change-section-vma .osrel="$(printf 0x%x $osrel_offs )" \

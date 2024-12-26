@@ -110,7 +110,7 @@ Shut down using `openrc-shutdown -p now`.
 * Assumes x86_64 (testing would be appreciated;
   I don't have aarch64 hardware that boots UKIs)
 
-* Dependent on Bash and coreutils
+* ~~Dependent on Bash and coreutils~~
 
 * Hardcoded to use zstd for compression
 
@@ -121,7 +121,7 @@ Shut down using `openrc-shutdown -p now`.
 
 ## Dependencies
 
-* Bash and coreutils
+* A POSIX shell (BusyBox should be enough)
 
 * A suitable EFI stub (`linuxx64.efi.stub`)
 
