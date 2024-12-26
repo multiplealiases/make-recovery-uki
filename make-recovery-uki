@@ -505,7 +505,7 @@ tmp="$(append_mktemp)"
 
 for _ in $(seq 1 10)
 do
-    resolve_kmods_iteration "$modulesdep" "$modlist" "$patterns_scratch" | tee /dev/stderr >> "$tmp"
+    resolve_kmods_iteration "$modulesdep" "$modlist" "$patterns_scratch" >> "$tmp"
     cat "$tmp" >> "$modlist"
     < "$modlist" sort | uniq > "$tmp"
     cat "$tmp" > "$modlist"
