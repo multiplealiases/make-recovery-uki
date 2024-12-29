@@ -35,6 +35,10 @@ die() {
 	exit 1
 }
 
+info() {
+    1>&2 printf '>>> %s\n' "$1"
+}
+
 cleanup_array="$(mktemp)"
 cleanup() {
     > /dev/null 2>&1 umount "$rootdir"/dev "$rootdir"/dev/shm "$rootdir"/dev/pts "$rootdir"/proc "$rootdir"/sys "$rootdir"/mnt || true
@@ -213,13 +217,16 @@ modlayout="$(append_mktemp)"
 osrel="$(append_mktemp)"
 
 vmlinuz="$(append_mktemp)"
+info 'Downloading Alpine vmlinuz'
 curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/netboot/vmlinuz-lts > "$vmlinuz"
+info 'Downloading Alpine modloop'
 modloop="$(append_mktemp)"
 curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/netboot/modloop-lts > "$modloop"
 modloop_extracted="$(append_mktemp -d)"
 amr="$(append_mktemp)"
 chmod +x "$amr"
 
+info 'Unpacking modloop'
 unpack_squashfs "$modloop_extracted" "$modloop"
 
 # every kmod currently loaded is probably fine
@@ -553,8 +560,10 @@ modulesdep="$modloop_extracted"/modules/"$kernel_ver"/modules.dep
 patterns_scratch="$(append_mktemp)"
 tmp="$(append_mktemp)"
 
-for _ in $(seq 1 10)
+info 'Resolving kernel module dependencies:'
+for i in $(seq 1 10)
 do
+    info "iteration $i out of 10"
     resolve_kmods_iteration "$modulesdep" "$modlist" "$patterns_scratch" >> "$tmp"
     cat "$tmp" >> "$modlist"
     < "$modlist" sort | uniq > "$tmp"
@@ -581,6 +590,7 @@ cd "$here"
 mkdir -p "$rootdir"/lib/modules/"$kernel_ver"
 cp -r "$moddir"/* "$rootdir"/lib/modules/"$kernel_ver"
 
+info 'Downloading and running alpine-make-rootfs'
 curl https://raw.githubusercontent.com/alpinelinux/alpine-make-rootfs/v0.7.0/alpine-make-rootfs > "$amr"
 # This is not a small package set,
 # but I feel functionality is far more important than smallness.
@@ -657,10 +667,12 @@ $(cat "$extrascript")
 INNER
 
 cd "$rootdir"
+info 'Making and compressing initramfs'
 find . -print0 | cpio --null -o --format=newc | zstd -T0 -19 -v > "$initfs"
 cat ./usr/lib/os-release > "$osrel"
 cd "$here"
 
+info 'Generating UKI'
 # Thank you, Arch Linux wiki.
 # https://wiki.archlinux.org/title/Unified_kernel_image#Manually
 align="$(objdump -p "$efistub" | awk '{ if ($1 == "SectionAlignment"){print $2} }')"
@@ -668,6 +680,7 @@ align=$(printf '%d\n' "$align")
 
 osrel_offs="$(objdump -h "$efistub" | tail -n2 | head -n1 | tr -s ' ' | cut -f 4,5 -d ' ' | xargs printf '0x%s ' | xargs -n1 printf '%d ' | awk '{print $1 + $2}')"
 osrel_offs=$((osrel_offs + align - osrel_offs % align))
+final_offs="$osrel_offs"
 # move the .osrel offset by 100 $aligns to appease the PE gods
 osrel_offs=$((osrel_offs + 100 * align ))
 
@@ -677,11 +690,23 @@ initrd_offs=$((initrd_offs + align - initrd_offs % align))
 linux_offs=$((initrd_offs + $(stat -Lc%s "$initfs")))
 linux_offs=$((linux_offs + align - linux_offs % align))
 
+2>&1 cat << MSG
+UKI debugging info
+alignment: $(printf '0x%x' "$align")
+last section: $(printf '0x%x' "$final_offs")
+.osrel  offset: $(printf '0x%x' "$osrel_offs")
+.initrd offset: $(printf '0x%x' "$initrd_offs")
+.linux  offset: $(printf '0x%x' "$linux_offs")
+MSG
+
 objcopy \
 	--add-section .osrel="$osrel" --change-section-vma .osrel="$(printf 0x%x $osrel_offs )" \
 	--add-section .initrd="$initfs" --change-section-vma .initrd="$(printf 0x%x $initrd_offs)"  \
 	--add-section .linux="$vmlinuz" --change-section-vma .linux="$(printf 0x%x $linux_offs)"   \
 	"$efistub" "$output".efi
+
+info 'Writing final vmlinuz, initramfs, and UKI under the names'
+info "$output, $output.img, $output.efi"
 
 cp "$initfs" "$output".img
 cp "$vmlinuz" "$output"
