@@ -121,7 +121,9 @@ Shut down using `openrc-shutdown -p now`.
 
 ## Dependencies
 
-* A POSIX shell (BusyBox should be enough)
+* A POSIX shell
+  (BusyBox should be enough,
+  but chimerautils (as found in Chimera Linux) is incompatible)
 
 * A suitable EFI stub (`linuxx64.efi.stub`)
 
@@ -138,6 +140,21 @@ Shut down using `openrc-shutdown -p now`.
 * `zstd`: compresses the initramfs
 
 * `file`: parsing kernel version out of vmlinuz
+
+## Compatibility
+
+make-recovery-uki is known to be compatible with only
+2 out of 3 major Linux distribution types:
+
+* Bash/coreutils, as found in GNU/Linux distributions,
+
+* BusyBox, as found in Alpine Linux.
+
+Chimera Linux, which uses chimerautils (ports of BSD utils)
+is incompatible because make-alpine-rootfs,
+a crucial dependency of this script,
+relies on the `-l` and `-o` options of getopt,
+which are absent there.
 
 ## Inspirations
 
