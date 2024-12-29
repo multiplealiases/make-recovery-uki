@@ -70,6 +70,20 @@ guess_efistub() {
     fi
 }
 
+unpack_squashfs() {
+    destination="$1"
+    squashfs="$2"
+    if 2>&1 > /dev/null type unsquashfs > /dev/null
+    then
+        unsquashfs -dest "$modloop_extracted" "$modloop"
+    elif 2>&1 > /dev/null type rdsquashfs > /dev/null
+    then
+        rdsquashfs --unpack-path / --unpack-root "$destination" "$squashfs"
+    else
+        die 'No squashfs unpacker found.\n'
+    fi
+}
+
 efistub_candidate="$(guess_efistub)"
 efistub="${efistub-$efistub_candidate}"
 
@@ -170,7 +184,7 @@ modloop_extracted="$(append_mktemp -d)"
 amr="$(append_mktemp)"
 chmod +x "$amr"
 
-unsquashfs -dest "$modloop_extracted" "$modloop"
+unpack_squashfs "$modloop_extracted" "$modloop"
 
 # every kmod currently loaded is probably fine
 cut -f 1 -d ' ' /proc/modules > "$modlist"

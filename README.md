@@ -129,7 +129,7 @@ Shut down using `openrc-shutdown -p now`.
 
 * `curl`: downloading files
 
-* squashfs-tools (`unsquashfs`): unpacking the modloop
+* At least one of squashfs-tools (`unsquashfs`) or squashfs-tools-ng (`rdsquashfs`): unpacking the modloop
 
 * `tar`: dependency of [`alpine-make-rootfs`](https://github.com/alpinelinux/alpine-make-rootfs)
 
