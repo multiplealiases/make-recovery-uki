@@ -127,7 +127,18 @@ The following programs are missing:$missing_progs
 MSG
 fi
 
-if [ -n "$missing_progs" ] || [ "$missing_efistub" = yes ]
+missing_squashfs='yes'
+type unsquashfs > /dev/null 2>&1 && missing_squashfs='no'
+type rdsquashfs > /dev/null 2>&1 && missing_squashfs='no'
+if [ "$missing_squashfs" = 'yes' ]
+then
+    1>&2 cat << MSG
+Missing squashfs unpacker.
+Install at least one of squashfs-tools or squashfs-tools-ng.
+MSG
+fi
+
+if [ -n "$missing_progs" ] || [ "$missing_efistub" = yes ] || [ "$missing_squashfs" = yes ]
 then
     exit 1
 fi
