@@ -105,7 +105,7 @@ Shut down using `openrc-shutdown -p now`.
 
 * No GUI
 
-* Does not print status information
+* ~~Does not print status information~~
 
 * Assumes x86_64 (testing would be appreciated;
   I don't have aarch64 hardware that boots UKIs)
