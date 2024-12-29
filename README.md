@@ -133,9 +133,9 @@ Shut down using `openrc-shutdown -p now`.
 
 * At least one of squashfs-tools (`unsquashfs`) or squashfs-tools-ng (`rdsquashfs`): unpacking the modloop
 
-* `tar`: dependency of [`alpine-make-rootfs`](https://github.com/alpinelinux/alpine-make-rootfs)
+* `tar`: dependency of [`alpine-make-rootfs`](https://github.com/alpinelinux/alpine-make-rootfs) (BusyBox `tar` is fine)
 
-* `cpio`: makes the initramfs
+* `cpio`: makes the initramfs (BusyBox `cpio` is fine)
 
 * `zstd`: compresses the initramfs
 
