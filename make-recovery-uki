@@ -103,7 +103,31 @@ Debian Sid, Ubuntu latest: systemd-boot-efi
 Fedora: systemd-boot-unsigned
 Gentoo: sys-apps/systemd[boot] or sys-apps/systemd-utils[boot]
 Void: systemd-boot-efistub
+
 MSG
+    missing_efistub="yes"
+fi
+
+missing_progs=""
+set +o errexit
+for prog in file objcopy curl tar cpio zstd file
+do
+    if ! type $prog > /dev/null 2>&1
+    then
+        missing_progs="$missing_progs $prog"
+    fi
+done
+set -o errexit
+
+if [ -n "$missing_progs" ]
+then
+    1>&2 cat << MSG
+The following programs are missing:$missing_progs
+MSG
+fi
+
+if [ -n "$missing_progs" ] || [ "$missing_efistub" = yes ]
+then
     exit 1
 fi
 
