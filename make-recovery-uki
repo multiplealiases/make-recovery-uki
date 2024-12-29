@@ -37,7 +37,7 @@ die() {
 
 cleanup_array="$(mktemp)"
 cleanup() {
-    umount "$rootdir"/dev "$rootdir"/dev/shm "$rootdir"/dev/pts "$rootdir"/proc "$rootdir"/sys "$rootdir"/mnt || true
+    > /dev/null 2>&1 umount "$rootdir"/dev "$rootdir"/dev/shm "$rootdir"/dev/pts "$rootdir"/proc "$rootdir"/sys "$rootdir"/mnt || true
     < "$cleanup_array" xargs -0 -I{} rm -rf {}
     rm -f "$cleanup_array"
 }
@@ -75,10 +75,10 @@ unpack_squashfs() {
     squashfs="$2"
     if 2>&1 > /dev/null type unsquashfs > /dev/null
     then
-        unsquashfs -dest "$modloop_extracted" "$modloop"
+        unsquashfs -q -dest "$modloop_extracted" "$modloop"
     elif 2>&1 > /dev/null type rdsquashfs > /dev/null
     then
-        rdsquashfs --unpack-path / --unpack-root "$destination" "$squashfs"
+        rdsquashfs -q --unpack-path / --unpack-root "$destination" "$squashfs"
     else
         die 'No squashfs unpacker found.\n'
     fi
@@ -574,7 +574,7 @@ cd "$moddir"
 xargs -0 mkdir -p < "$modlayout"
 
 cd "$modloop_extracted"/modules/"$kernel_ver"/
-find . -type f -name '*.ko' | grep -f "$modlist" | xargs -I{} cp -v {} "$moddir"/{}
+find . -type f -name '*.ko' | grep -f "$modlist" | xargs -I{} cp {} "$moddir"/{}
 
 cd "$here"
 
