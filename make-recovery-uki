@@ -86,6 +86,7 @@ unpack_squashfs() {
 
 efistub_candidate="$(guess_efistub)"
 efistub="${efistub-$efistub_candidate}"
+missing_efistub="no"
 
 if [ "$efistub" = "" ]
 then
