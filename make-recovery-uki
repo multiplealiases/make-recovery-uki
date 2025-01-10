@@ -104,7 +104,7 @@ a suitable stub under the following package names.
 Alpine: gummiboot-efistub
 Arch: systemd
 Chimera: systemd-boot-efi
-Debian Sid, Ubuntu latest: systemd-boot-efi
+Debian Bookworm, Ubuntu 24.04+: systemd-boot-efi
 Fedora: systemd-boot-unsigned
 Gentoo: sys-apps/systemd[boot] or sys-apps/systemd-utils[boot]
 Void: systemd-boot-efistub
